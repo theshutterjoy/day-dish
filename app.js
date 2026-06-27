@@ -3,6 +3,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const dashboard = document.getElementById('dashboard');
     const dayDescription = document.getElementById('day-description');
     const dailyBudgetInput = document.getElementById('daily-budget');
+    const currencySelect = document.getElementById('currency-select');
     const generationStatus = document.getElementById('generation-status');
     
     // Grid content containers
@@ -17,6 +18,7 @@ document.addEventListener('DOMContentLoaded', () => {
     generateBtn.addEventListener('click', async () => {
         const context = dayDescription.value.trim();
         const budget = dailyBudgetInput.value.trim() || '25';
+        const currency = currencySelect ? currencySelect.value : '$';
 
         if (!context) {
             dayDescription.focus();
@@ -51,7 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     {
                         "parts": [
                             {
-                                "text": `User Context: ${context}\nDaily Budget: $${budget}`
+                                "text": `User Context: ${context}\nDaily Budget: ${currency}${budget}`
                             }
                         ]
                     }
@@ -77,7 +79,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const aiText = data.candidates[0].content.parts[0].text;
             const parsedData = JSON.parse(aiText);
 
-            populateDashboard(parsedData, parseFloat(budget));
+            populateDashboard(parsedData, parseFloat(budget), currency);
         } catch (error) {
             console.error("Error generating meal plan:", error);
             generationStatus.innerHTML = `<i class="ph ph-warning"></i> Error generating plan. Try again.`;
@@ -88,7 +90,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    function populateDashboard(data, targetBudget) {
+    function populateDashboard(data, targetBudget, currency) {
         // Hide skeletons, show content
         document.querySelectorAll('.skeleton-group').forEach(el => el.classList.add('hidden'));
         document.querySelectorAll('.content-group').forEach(el => {
@@ -110,7 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <input type="checkbox" class="custom-checkbox mt-1">
                     <div class="flex flex-col">
                         <span class="text-sm font-medium ${color} capitalize">${mealType} (${time})</span>
-                        <span class="text-white font-medium">${details.name}</span>
+                        <span class="text-white font-medium meal-item-name">${details.name}</span>
                         <span class="text-xs text-slate-400 mt-1 flex items-center gap-1"><i class="ph ph-fire"></i> ${details.calories} • ${details.prepTime}</span>
                     </div>
                 </label>
@@ -123,7 +125,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const groceryHTML = Object.entries(groceries).map(([category, items]) => {
             const itemsList = Array.isArray(items) ? items.map(item => `
                 <label class="flex items-center gap-3 text-sm text-slate-200 cursor-pointer hover:text-white transition-colors">
-                    <input type="checkbox" class="custom-checkbox"> ${item}
+                    <input type="checkbox" class="custom-checkbox"> <span class="grocery-item-name">${item}</span>
                 </label>
             `).join('') : '';
             
@@ -136,7 +138,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }).join('');
         groceryContent.innerHTML = groceryHTML;
 
-        // 3. Substitutions Data
+        // 3. Substitutions Data & Logic
         const subs = data.substitutions || [];
         const subsHTML = subs.map(sub => `
             <div class="flex items-center justify-between p-3 rounded-xl bg-slate-800/30 border border-white/5">
@@ -150,6 +152,33 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
         `).join('');
         substitutionsContent.innerHTML = subsHTML;
+
+        // Setup real-time toggle logic
+        const toggleSwitches = substitutionsContent.querySelectorAll('.toggle-switch');
+        toggleSwitches.forEach((toggle, index) => {
+            toggle.addEventListener('change', (e) => {
+                const sub = subs[index];
+                const isChecked = e.target.checked;
+                const searchFor = isChecked ? sub.original : sub.swap;
+                const replaceWith = isChecked ? sub.swap : sub.original;
+                
+                // Helper to replace text safely in nodes
+                const replaceInNodes = (selector) => {
+                    document.querySelectorAll(selector).forEach(node => {
+                        const regex = new RegExp(searchFor, 'gi'); // Case-insensitive
+                        if (regex.test(node.textContent)) {
+                            // Only update text content, keep HTML structure safe
+                            // For simplicity, since we just have inner spans, we can replace directly
+                            node.textContent = node.textContent.replace(regex, replaceWith);
+                        }
+                    });
+                };
+
+                // Update schedule names and grocery items dynamically
+                replaceInNodes('.meal-item-name');
+                replaceInNodes('.grocery-item-name');
+            });
+        });
 
         // 4. Budget Status Data
         const analysis = data.budgetAnalysis || { totalCost: 0, feasible: true, justification: "" };
@@ -170,7 +199,7 @@ document.addEventListener('DOMContentLoaded', () => {
                           class="gauge-arc" style="stroke-dasharray: 126; stroke-dashoffset: 126;"/>
                 </svg>
                 <div class="absolute bottom-0 text-2xl font-display font-semibold text-white">
-                    $${estimatedCost.toFixed(2)}
+                    ${currency}${estimatedCost.toFixed(2)}
                 </div>
             </div>
             <div class="text-center mt-2 flex flex-col gap-1 w-full">
