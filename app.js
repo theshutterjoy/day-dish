@@ -2,6 +2,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const generateBtn = document.getElementById('generate-btn');
     const dashboard = document.getElementById('dashboard');
     const dayDescription = document.getElementById('day-description');
+    const dailyBudgetInput = document.getElementById('daily-budget');
     const generationStatus = document.getElementById('generation-status');
     
     // Grid content containers
@@ -10,9 +11,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const substitutionsContent = document.getElementById('substitutions-content');
     const budgetContent = document.getElementById('budget-content');
 
-    generateBtn.addEventListener('click', () => {
-        if (!dayDescription.value.trim()) {
-            // Simple shake animation or focus if empty
+    const GEMINI_API_KEY = "AQ.Ab8RN6KAHLeFQ9I1rD8tzyosiB9vysf_bwPbyVrLY82jeqndWA";
+    const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+
+    generateBtn.addEventListener('click', async () => {
+        const context = dayDescription.value.trim();
+        const budget = dailyBudgetInput.value.trim() || '25';
+
+        if (!context) {
             dayDescription.focus();
             return;
         }
@@ -24,18 +30,65 @@ document.addEventListener('DOMContentLoaded', () => {
         // Reset state
         document.querySelectorAll('.skeleton-group').forEach(el => el.classList.remove('hidden'));
         document.querySelectorAll('.content-group').forEach(el => el.classList.add('hidden'));
+        generationStatus.innerHTML = `<i class="ph ph-spinner-gap animate-spin"></i> Generating...`;
+        generationStatus.classList.remove('text-red-400');
+        generationStatus.classList.add('text-accent-400');
         generationStatus.classList.remove('hidden');
         
         // Scroll to dashboard smoothly
         dashboard.scrollIntoView({ behavior: 'smooth', block: 'start' });
         
-        // Simulate AI API call delay (2.5s)
-        setTimeout(() => {
-            populateDashboard();
-        }, 2500);
+        try {
+            const requestBody = {
+                "system_instruction": {
+                    "parts": [
+                        {
+                            "text": "You are an elite culinary planner and financial advisor. Analyze the user's daily schedule and constraints to output a strictly structured JSON containing: \n1. mealPlan: Specific, fast, context-appropriate meals for Breakfast, Lunch, and Dinner matching their day. Each meal must have 'name', 'calories' (e.g. '450 kcal'), and 'prepTime' (e.g. '10 min').\n2. groceryList: Every raw ingredient needed, grouped by category (e.g., 'Produce', 'Pantry', 'Dairy'). The value for each category should be an array of strings.\n3. substitutions: At least two alternative swap suggestions for key ingredients. Each swap must have 'original', 'swap', and 'reason'.\n4. budgetAnalysis: calculate total estimated grocery cost vs user budget. Must contain 'totalCost' (number), 'feasible' (boolean flag), and 'justification' (short string)."
+                        }
+                    ]
+                },
+                "contents": [
+                    {
+                        "parts": [
+                            {
+                                "text": `User Context: ${context}\nDaily Budget: $${budget}`
+                            }
+                        ]
+                    }
+                ],
+                "generationConfig": {
+                    "responseMimeType": "application/json"
+                }
+            };
+
+            const response = await fetch(GEMINI_API_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(requestBody)
+            });
+
+            if (!response.ok) {
+                throw new Error(`API error: ${response.status}`);
+            }
+
+            const data = await response.json();
+            const aiText = data.candidates[0].content.parts[0].text;
+            const parsedData = JSON.parse(aiText);
+
+            populateDashboard(parsedData, parseFloat(budget));
+        } catch (error) {
+            console.error("Error generating meal plan:", error);
+            generationStatus.innerHTML = `<i class="ph ph-warning"></i> Error generating plan. Try again.`;
+            generationStatus.classList.remove('text-accent-400');
+            generationStatus.classList.add('text-red-400');
+            // Hide skeletons on error
+            document.querySelectorAll('.skeleton-group').forEach(el => el.classList.add('hidden'));
+        }
     });
 
-    function populateDashboard() {
+    function populateDashboard(data, targetBudget) {
         // Hide skeletons, show content
         document.querySelectorAll('.skeleton-group').forEach(el => el.classList.add('hidden'));
         document.querySelectorAll('.content-group').forEach(el => {
@@ -45,91 +98,73 @@ document.addEventListener('DOMContentLoaded', () => {
         generationStatus.classList.add('hidden');
 
         // 1. Schedule Data
-        scheduleContent.innerHTML = `
-            <label class="flex items-start gap-4 p-3 rounded-xl hover:bg-white/5 transition-colors cursor-pointer group">
-                <input type="checkbox" class="custom-checkbox mt-1">
-                <div class="flex flex-col">
-                    <span class="text-sm font-medium text-blue-400">Breakfast (8:00 AM)</span>
-                    <span class="text-white font-medium">Protein Oats & Berries</span>
-                    <span class="text-xs text-slate-400 mt-1 flex items-center gap-1"><i class="ph ph-fire"></i> 450 kcal • 10 min prep</span>
-                </div>
-            </label>
-            <label class="flex items-start gap-4 p-3 rounded-xl hover:bg-white/5 transition-colors cursor-pointer group">
-                <input type="checkbox" class="custom-checkbox mt-1">
-                <div class="flex flex-col">
-                    <span class="text-sm font-medium text-orange-400">Lunch (1:00 PM)</span>
-                    <span class="text-white font-medium">Grilled Chicken Quinoa Bowl</span>
-                    <span class="text-xs text-slate-400 mt-1 flex items-center gap-1"><i class="ph ph-fire"></i> 650 kcal • 15 min prep</span>
-                </div>
-            </label>
-            <label class="flex items-start gap-4 p-3 rounded-xl hover:bg-white/5 transition-colors cursor-pointer group">
-                <input type="checkbox" class="custom-checkbox mt-1">
-                <div class="flex flex-col">
-                    <span class="text-sm font-medium text-emerald-400">Dinner (7:30 PM)</span>
-                    <span class="text-white font-medium">Baked Salmon & Asparagus</span>
-                    <span class="text-xs text-slate-400 mt-1 flex items-center gap-1"><i class="ph ph-fire"></i> 550 kcal • 25 min prep</span>
-                </div>
-            </label>
-        `;
+        const meals = data.mealPlan || {};
+        const mealHTML = Object.entries(meals).map(([mealType, details]) => {
+            let color = 'text-blue-400';
+            let time = '8:00 AM';
+            if (mealType.toLowerCase().includes('lunch')) { color = 'text-orange-400'; time = '1:00 PM'; }
+            if (mealType.toLowerCase().includes('dinner')) { color = 'text-emerald-400'; time = '7:30 PM'; }
+            
+            return `
+                <label class="flex items-start gap-4 p-3 rounded-xl hover:bg-white/5 transition-colors cursor-pointer group">
+                    <input type="checkbox" class="custom-checkbox mt-1">
+                    <div class="flex flex-col">
+                        <span class="text-sm font-medium ${color} capitalize">${mealType} (${time})</span>
+                        <span class="text-white font-medium">${details.name}</span>
+                        <span class="text-xs text-slate-400 mt-1 flex items-center gap-1"><i class="ph ph-fire"></i> ${details.calories} • ${details.prepTime}</span>
+                    </div>
+                </label>
+            `;
+        }).join('');
+        scheduleContent.innerHTML = mealHTML;
 
         // 2. Grocery List Data
-        groceryContent.innerHTML = `
-            <div class="flex flex-col gap-2">
-                <span class="text-xs font-semibold tracking-wider text-slate-500 uppercase">Produce</span>
+        const groceries = data.groceryList || {};
+        const groceryHTML = Object.entries(groceries).map(([category, items]) => {
+            const itemsList = Array.isArray(items) ? items.map(item => `
                 <label class="flex items-center gap-3 text-sm text-slate-200 cursor-pointer hover:text-white transition-colors">
-                    <input type="checkbox" class="custom-checkbox"> Mixed Berries (200g)
+                    <input type="checkbox" class="custom-checkbox"> ${item}
                 </label>
-                <label class="flex items-center gap-3 text-sm text-slate-200 cursor-pointer hover:text-white transition-colors">
-                    <input type="checkbox" class="custom-checkbox"> Asparagus (1 bunch)
-                </label>
-            </div>
-            <div class="flex flex-col gap-2">
-                <span class="text-xs font-semibold tracking-wider text-slate-500 uppercase">Proteins & Dairy</span>
-                <label class="flex items-center gap-3 text-sm text-slate-200 cursor-pointer hover:text-white transition-colors">
-                    <input type="checkbox" class="custom-checkbox"> Chicken Breast (200g)
-                </label>
-                <label class="flex items-center gap-3 text-sm text-slate-200 cursor-pointer hover:text-white transition-colors">
-                    <input type="checkbox" class="custom-checkbox"> Salmon Fillet (150g)
-                </label>
-            </div>
-        `;
+            `).join('') : '';
+            
+            return `
+                <div class="flex flex-col gap-2 mb-2">
+                    <span class="text-xs font-semibold tracking-wider text-slate-500 uppercase">${category}</span>
+                    ${itemsList}
+                </div>
+            `;
+        }).join('');
+        groceryContent.innerHTML = groceryHTML;
 
         // 3. Substitutions Data
-        substitutionsContent.innerHTML = `
+        const subs = data.substitutions || [];
+        const subsHTML = subs.map(sub => `
             <div class="flex items-center justify-between p-3 rounded-xl bg-slate-800/30 border border-white/5">
-                <div class="flex flex-col">
-                    <span class="text-sm text-white font-medium">Chicken <i class="ph ph-arrow-right text-slate-500 text-xs mx-1"></i> Tofu</span>
-                    <span class="text-xs text-slate-400">Vegetarian option (-$2.50)</span>
+                <div class="flex flex-col flex-1 pr-4">
+                    <span class="text-sm text-white font-medium flex items-center flex-wrap gap-1">
+                        ${sub.original} <i class="ph ph-arrow-right text-slate-500 text-xs"></i> ${sub.swap}
+                    </span>
+                    <span class="text-xs text-slate-400 mt-1">${sub.reason}</span>
                 </div>
-                <input type="checkbox" class="toggle-switch">
+                <input type="checkbox" class="toggle-switch flex-shrink-0">
             </div>
-            <div class="flex items-center justify-between p-3 rounded-xl bg-slate-800/30 border border-white/5">
-                <div class="flex flex-col">
-                    <span class="text-sm text-white font-medium">Oats <i class="ph ph-arrow-right text-slate-500 text-xs mx-1"></i> Chia Pudding</span>
-                    <span class="text-xs text-slate-400">Low-carb option (+$1.00)</span>
-                </div>
-                <input type="checkbox" class="toggle-switch">
-            </div>
-        `;
+        `).join('');
+        substitutionsContent.innerHTML = subsHTML;
 
         // 4. Budget Status Data
-        const dailyBudgetInput = document.getElementById('daily-budget').value;
-        const targetBudget = dailyBudgetInput ? parseFloat(dailyBudgetInput) : 25.00;
-        const estimatedCost = 18.50;
-        const percentage = Math.min((estimatedCost / targetBudget) * 100, 100);
+        const analysis = data.budgetAnalysis || { totalCost: 0, feasible: true, justification: "" };
+        const estimatedCost = parseFloat(analysis.totalCost);
+        const percentage = Math.min((estimatedCost / targetBudget) * 100, 100) || 0;
         
-        // Dynamic color based on budget (green if well under, orange/red if close/over)
         let strokeColor = '#34d399'; // emerald-400
         if (percentage > 85) strokeColor = '#fbbf24'; // amber-400
-        if (percentage > 100) strokeColor = '#ef4444'; // red-500
+        if (!analysis.feasible || percentage > 100) strokeColor = '#ef4444'; // red-500
 
         budgetContent.innerHTML = `
             <div class="relative w-32 h-16 flex items-end justify-center overflow-hidden">
-                <!-- Background Arc -->
                 <svg viewBox="0 0 100 50" class="w-full h-full absolute bottom-0">
                     <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="12" stroke-linecap="round"/>
                 </svg>
-                <!-- Foreground Arc (Animated) -->
                 <svg viewBox="0 0 100 50" class="w-full h-full absolute bottom-0">
                     <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="${strokeColor}" stroke-width="12" stroke-linecap="round" 
                           class="gauge-arc" style="stroke-dasharray: 126; stroke-dashoffset: 126;"/>
@@ -138,17 +173,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     $${estimatedCost.toFixed(2)}
                 </div>
             </div>
-            <div class="text-center mt-2 flex flex-col gap-1">
-                <span class="text-sm text-slate-300">Estimated Daily Cost</span>
-                <span class="text-xs text-slate-400">Target: $${targetBudget.toFixed(2)} (${percentage.toFixed(0)}%)</span>
+            <div class="text-center mt-2 flex flex-col gap-1 w-full">
+                <span class="text-sm text-slate-300">Estimated Cost</span>
+                <span class="text-xs ${analysis.feasible ? 'text-emerald-400' : 'text-red-400'} font-medium">
+                    ${analysis.feasible ? 'Under Budget' : 'Over Budget'}
+                </span>
+                <span class="text-xs text-slate-400 mt-1 max-w-[200px] mx-auto">${analysis.justification}</span>
             </div>
         `;
 
-        // Trigger gauge animation on next frame
         requestAnimationFrame(() => {
             const gauge = budgetContent.querySelector('.gauge-arc');
             if (gauge) {
-                // Total length of semi-circle is approx 126 (pi * r = 3.14 * 40)
                 const offset = 126 - (126 * percentage / 100);
                 gauge.style.strokeDashoffset = Math.max(0, offset);
             }
